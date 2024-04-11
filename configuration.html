@@ -78,7 +78,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Neovide</a></li><li class="spacer"></li><li class="chapter-item expanded "><a href="features.html"><strong aria-hidden="true">1.</strong> Features</a></li><li class="chapter-item expanded "><a href="installation.html"><strong aria-hidden="true">2.</strong> Installation</a></li><li class="chapter-item expanded "><a href="configuration.html" class="active"><strong aria-hidden="true">3.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="command-line-reference.html"><strong aria-hidden="true">4.</strong> Command Line Reference</a></li><li class="chapter-item expanded "><a href="config-file.html"><strong aria-hidden="true">5.</strong> Config File</a></li><li class="chapter-item expanded "><a href="editing-with-external-tools.html"><strong aria-hidden="true">6.</strong> Editing w/ External Tools</a></li><li class="chapter-item expanded "><a href="troubleshooting.html"><strong aria-hidden="true">7.</strong> Troubleshooting</a></li><li class="chapter-item expanded "><a href="faq.html"><strong aria-hidden="true">8.</strong> FAQ</a></li><li class="chapter-item expanded "><a href="maintainer-cookbook.html"><strong aria-hidden="true">9.</strong> Maintainer Cookbook</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded affix "><a href="index.html">Neovide</a></li><li class="spacer"></li><li class="chapter-item expanded "><a href="features.html"><strong aria-hidden="true">1.</strong> Features</a></li><li class="chapter-item expanded "><a href="installation.html"><strong aria-hidden="true">2.</strong> Installation</a></li><li class="chapter-item expanded "><a href="configuration.html" class="active"><strong aria-hidden="true">3.</strong> Configuration</a></li><li class="chapter-item expanded "><a href="commands.html"><strong aria-hidden="true">4.</strong> Commands</a></li><li class="chapter-item expanded "><a href="command-line-reference.html"><strong aria-hidden="true">5.</strong> Command Line Reference</a></li><li class="chapter-item expanded "><a href="config-file.html"><strong aria-hidden="true">6.</strong> Config File</a></li><li class="chapter-item expanded "><a href="editing-with-external-tools.html"><strong aria-hidden="true">7.</strong> Editing w/ External Tools</a></li><li class="chapter-item expanded "><a href="troubleshooting.html"><strong aria-hidden="true">8.</strong> Troubleshooting</a></li><li class="chapter-item expanded "><a href="faq.html"><strong aria-hidden="true">9.</strong> FAQ</a></li><li class="chapter-item expanded "><a href="maintainer-cookbook.html"><strong aria-hidden="true">10.</strong> Maintainer Cookbook</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
         </nav>
@@ -259,7 +259,11 @@ vim.g.neovide_padding_left = 0
 <p><strong>Available since 0.10.4.</strong></p>
 <p>Controls the space between the window border and the actual Neovim, which is filled with the
 background color instead.</p>
-<h4 id="background-color-currently-macos-only"><a class="header" href="#background-color-currently-macos-only">Background Color (Currently macOS only)</a></h4>
+<h4 id="background-color-deprecated-currently-macos-only"><a class="header" href="#background-color-deprecated-currently-macos-only">Background Color (<strong>Deprecated</strong>, Currently macOS only)</a></h4>
+<p>This configuration is deprecated now and might be removed in the future. In
+<a href="https://github.com/neovide/neovide/issues/2168">#2168</a>, we have made Neovide control the title bar
+color itself. The color of title bar now honors <a href="#transparency"><code>neovide_transparency</code></a>. If you want
+a transparent title bar, setting <code>neovide_transparency</code> is sufficient.</p>
 <p>VimScript:</p>
 <pre><code class="language-vim">&quot; g:neovide_transparency should be 0 if you want to unify transparency of content and title bar.
 let g:neovide_transparency = 0.0
@@ -276,7 +280,8 @@ vim.g.neovide_transparency = 0.0
 vim.g.transparency = 0.8
 vim.g.neovide_background_color = &quot;#0f1117&quot; .. alpha()
 </code></pre>
-<p><strong>Available since 0.10.</strong></p>
+<p><strong>Available since 0.10.</strong>
+<strong>Deprecated in 0.12.2.</strong></p>
 <p><img src="assets/BackgroundColor.png" alt="BackgroundColor" /></p>
 <p>Setting <code>g:neovide_background_color</code> to a value that can be parsed by
 <a href="https://github.com/mazznoer/csscolorparser-rs">csscolorparser-rs</a> will set the color of the whole
@@ -292,7 +297,7 @@ title bar.</p>
 </code></pre>
 <p><strong>Available since 0.12.</strong></p>
 <p>Setting <code>g:neovide_window_blurred</code> toggles the window blur state.</p>
-<p>The blurred level respects the <code>g:neovide_transparency</code>  value between 0.0 and 1.0.</p>
+<p>The blurred level respects the <code>g:neovide_transparency</code> value between 0.0 and 1.0.</p>
 <h4 id="floating-blur-amount"><a class="header" href="#floating-blur-amount">Floating Blur Amount</a></h4>
 <p>VimScript:</p>
 <pre><code class="language-vim">let g:neovide_floating_blur_amount_x = 2.0
@@ -336,6 +341,15 @@ The other variables configure the shadow in various ways:</p>
 <p><img src="assets/Transparency.png" alt="Transparency" /></p>
 <p>Setting <code>g:neovide_transparency</code> to a value between 0.0 and 1.0 will set the opacity of the window
 to that value.</p>
+<h4 id="show-border-currently-macos-only"><a class="header" href="#show-border-currently-macos-only">Show Border (Currently macOS only)</a></h4>
+<p>VimScript:</p>
+<pre><code class="language-vim">let g:neovide_show_border = v:true
+</code></pre>
+<p>Lua:</p>
+<pre><code class="language-lua">vim.g.neovide_show_border = true
+</code></pre>
+<p>Draw a grey border around opaque windows only.</p>
+<p>Default: <code>false</code></p>
 <h4 id="scroll-animation-length"><a class="header" href="#scroll-animation-length">Scroll Animation Length</a></h4>
 <p>VimScript:</p>
 <pre><code class="language-vim">let g:neovide_scroll_animation_length = 0.3
@@ -618,6 +632,16 @@ command line.</p>
 If the value is &lt;=0 then the cursor will be invisible. This setting takes effect when the editor
 window is unfocused, at which time a block cursor will be rendered as an outline instead of as a
 full rectangle.</p>
+<h4 id="animate-cursor-blink"><a class="header" href="#animate-cursor-blink">Animate cursor blink</a></h4>
+<p>VimScript:</p>
+<pre><code class="language-vim">let g:neovide_cursor_smooth_blink = v:false
+</code></pre>
+<p>Lua:</p>
+<pre><code class="language-lua">vim.g.neovide_cursor_smooth_blink = false
+</code></pre>
+<p>If enabled, the cursor will smoothly animate the transition between the cursor's on and off state.
+The built in <code>guicursor</code> neovim option needs to be configured to enable blinking by having a value
+set for both <code>blinkoff</code>, <code>blinkon</code> and <code>blinkwait</code> for this setting to apply.</p>
 <h3 id="cursor-particles"><a class="header" href="#cursor-particles">Cursor Particles</a></h3>
 <p>There are a number of vfx modes you can enable which produce particles behind the cursor. These are
 enabled by setting <code>g:neovide_cursor_vfx_mode</code> to one of the following constants.</p>
@@ -742,7 +766,7 @@ more &quot;nervous&quot;, the lower, the more it looks like a collapsing sine wa
                             <a rel="prev" href="installation.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
-                            <a rel="next" href="command-line-reference.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next" href="commands.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
                         <div style="clear: both"></div>
@@ -754,7 +778,7 @@ more &quot;nervous&quot;, the lower, the more it looks like a collapsing sine wa
                     <a rel="prev" href="installation.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
-                    <a rel="next" href="command-line-reference.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next" href="commands.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
