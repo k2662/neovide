@@ -7,9 +7,15 @@ mod window;
 use std::{collections::HashMap, rc::Rc, sync::Arc, thread};
 use tokio::sync::mpsc::unbounded_channel;
 
-use log::{error, trace};
+use log::{error, trace, warn};
 
 use winit::event_loop::EventLoopProxy;
+
+#[cfg(target_os = "macos")]
+use winit::window::Theme;
+
+#[cfg(target_os = "macos")]
+use skia_safe::Color4f;
 
 use crate::{
     bridge::{GuiOption, NeovimHandler, RedrawEvent, WindowAnchor},
@@ -17,6 +23,9 @@ use crate::{
     renderer::DrawCommand,
     window::{UserEvent, WindowCommand},
 };
+
+#[cfg(target_os = "macos")]
+use crate::{cmd_line::CmdLineSettings, frame::Frame, settings::SETTINGS};
 
 pub use cursor::{Cursor, CursorMode, CursorShape};
 pub use draw_command_batcher::DrawCommandBatcher;
@@ -145,6 +154,16 @@ impl Editor {
             }
             RedrawEvent::DefaultColorsSet { colors } => {
                 tracy_zone!("EditorDefaultColorsSet");
+
+                // Set the dark/light theme of window, so the titlebar text gets correct color.
+                #[cfg(target_os = "macos")]
+                if SETTINGS.get::<CmdLineSettings>().frame == Frame::Transparent {
+                    let _ = self.event_loop_proxy.send_event(
+                        WindowCommand::ThemeChanged(window_theme_for_background(colors.background))
+                            .into(),
+                    );
+                }
+
                 self.draw_command_batcher
                     .queue(DrawCommand::DefaultStyleChanged(Style::new(colors)));
                 self.redraw_screen();
@@ -269,12 +288,15 @@ impl Editor {
                 self.set_ui_ready();
                 self.send_updated_viewport(grid, scroll_delta)
             }
-            RedrawEvent::ShowIntro { message } => {
-                // Support the yet unmerged intro message support
-                // This could probably be handled completely on the lua side
-                let _ = self
-                    .event_loop_proxy
-                    .send_event(WindowCommand::ShowIntro(message).into());
+            RedrawEvent::WindowViewportMargins {
+                grid,
+                top,
+                bottom,
+                left,
+                right,
+            } => {
+                tracy_zone!("EditorWindowViewportMargins");
+                self.send_updated_viewport_margins(grid, top, bottom, left, right)
             }
             // Interpreting suspend as a window minimize request
             RedrawEvent::Suspend => {
@@ -358,6 +380,11 @@ impl Editor {
         anchor_top: f64,
         sort_order: Option<u64>,
     ) {
+        if anchor_grid == grid {
+            warn!("NeoVim requested a window to float relative to itself. This is not supported.");
+            return;
+        }
+
         let parent_position = self.get_window_top_left(anchor_grid);
         if let Some(window) = self.windows.get_mut(&grid) {
             let width = window.get_width();
@@ -507,12 +534,12 @@ impl Editor {
                     let _ = self
                         .event_loop_proxy
                         .send_event(WindowCommand::ListAvailableFonts.into());
+                } else {
+                    self.draw_command_batcher
+                        .queue(DrawCommand::FontChanged(guifont));
+
+                    self.redraw_screen();
                 }
-
-                self.draw_command_batcher
-                    .queue(DrawCommand::FontChanged(guifont));
-
-                self.redraw_screen();
             }
             GuiOption::LineSpace(linespace) => {
                 self.draw_command_batcher
@@ -527,6 +554,21 @@ impl Editor {
     fn send_updated_viewport(&mut self, grid: u64, scroll_delta: f64) {
         if let Some(window) = self.windows.get_mut(&grid) {
             window.update_viewport(scroll_delta);
+        } else {
+            trace!("viewport event received before window initialized");
+        }
+    }
+
+    fn send_updated_viewport_margins(
+        &mut self,
+        grid: u64,
+        top: u64,
+        bottom: u64,
+        left: u64,
+        right: u64,
+    ) {
+        if let Some(window) = self.windows.get_mut(&grid) {
+            window.update_viewport_margins(top, bottom, left, right);
         } else {
             trace!("viewport event received before window initialized");
         }
@@ -557,4 +599,22 @@ pub fn start_editor(event_loop_proxy: EventLoopProxy<UserEvent>) -> NeovimHandle
         }
     });
     handler
+}
+
+/// Based on formula in https://graphicdesign.stackexchange.com/questions/62368/automatically-select-a-foreground-color-based-on-a-background-color
+/// Check if the color is light or dark
+#[cfg(target_os = "macos")]
+fn is_light_color(color: &Color4f) -> bool {
+    0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b > 0.5
+}
+
+/// Get the proper dark/light theme for a background_color.
+#[cfg(target_os = "macos")]
+fn window_theme_for_background(background_color: Option<Color4f>) -> Option<Theme> {
+    background_color?;
+
+    match background_color.unwrap() {
+        color if is_light_color(&color) => Some(Theme::Light),
+        _ => Some(Theme::Dark),
+    }
 }

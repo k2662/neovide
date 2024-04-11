@@ -144,7 +144,12 @@ vim.g.neovide_padding_left = 0
 Controls the space between the window border and the actual Neovim, which is filled with the
 background color instead.
 
-#### Background Color (Currently macOS only)
+#### Background Color (**Deprecated**, Currently macOS only)
+
+This configuration is deprecated now and might be removed in the future. In
+[#2168](https://github.com/neovide/neovide/issues/2168), we have made Neovide control the title bar
+color itself. The color of title bar now honors [`neovide_transparency`](#transparency). If you want
+a transparent title bar, setting `neovide_transparency` is sufficient.
 
 VimScript:
 
@@ -169,6 +174,7 @@ vim.g.neovide_background_color = "#0f1117" .. alpha()
 ```
 
 **Available since 0.10.**
+**Deprecated in 0.12.2.**
 
 ![BackgroundColor](assets/BackgroundColor.png)
 
@@ -197,7 +203,7 @@ vim.g.neovide_window_blurred = true
 
 Setting `g:neovide_window_blurred` toggles the window blur state.
 
-The blurred level respects the `g:neovide_transparency`  value between 0.0 and 1.0.
+The blurred level respects the `g:neovide_transparency` value between 0.0 and 1.0.
 
 #### Floating Blur Amount
 
@@ -267,6 +273,24 @@ vim.g.neovide_transparency = 0.8
 
 Setting `g:neovide_transparency` to a value between 0.0 and 1.0 will set the opacity of the window
 to that value.
+
+#### Show Border (Currently macOS only)
+
+VimScript:
+
+```vim
+let g:neovide_show_border = v:true
+```
+
+Lua:
+
+```lua
+vim.g.neovide_show_border = true
+```
+
+Draw a grey border around opaque windows only.
+
+Default: `false`
 
 #### Scroll Animation Length
 
@@ -756,6 +780,24 @@ Specify cursor outline width in `em`s. You probably want this to be a positive v
 If the value is \<=0 then the cursor will be invisible. This setting takes effect when the editor
 window is unfocused, at which time a block cursor will be rendered as an outline instead of as a
 full rectangle.
+
+#### Animate cursor blink
+
+VimScript:
+
+```vim
+let g:neovide_cursor_smooth_blink = v:false
+```
+
+Lua:
+
+```lua
+vim.g.neovide_cursor_smooth_blink = false
+```
+
+If enabled, the cursor will smoothly animate the transition between the cursor's on and off state.
+The built in `guicursor` neovim option needs to be configured to enable blinking by having a value
+set for both `blinkoff`, `blinkon` and `blinkwait` for this setting to apply.
 
 ### Cursor Particles
 

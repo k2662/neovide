@@ -1,59 +1,46 @@
 mod error_window;
 mod keyboard_manager;
 mod mouse_manager;
-mod renderer;
 mod settings;
 mod update_loop;
 mod window_wrapper;
 
 #[cfg(target_os = "macos")]
-mod draw_background;
-
-#[cfg(target_os = "macos")]
-use cocoa::base::id;
+mod macos;
 
 #[cfg(target_os = "linux")]
 use std::env;
+
+#[cfg(target_os = "macos")]
+use icrate::Foundation::MainThreadMarker;
 
 use winit::{
     dpi::{PhysicalSize, Size},
     error::EventLoopError,
     event::Event,
     event_loop::{EventLoop, EventLoopBuilder},
-    window::{Icon, WindowBuilder},
+    window::{Icon, Theme, WindowBuilder},
 };
-
-#[cfg(target_os = "macos")]
-use winit::window::Window;
 
 #[cfg(target_os = "macos")]
 use winit::platform::macos::WindowBuilderExtMacOS;
 
-#[cfg(target_os = "macos")]
-use objc::{msg_send, sel, sel_impl};
-
-#[cfg(target_os = "macos")]
-use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
-
-#[cfg(target_os = "macos")]
-use draw_background::draw_background;
-
 #[cfg(target_os = "linux")]
-use winit::platform::wayland::WindowBuilderExtWayland;
-#[cfg(target_os = "linux")]
-use winit::platform::x11::WindowBuilderExtX11;
+use winit::platform::{wayland::WindowBuilderExtWayland, x11::WindowBuilderExtX11};
+
+#[cfg(target_os = "macos")]
+use winit::platform::macos::EventLoopBuilderExtMacOS;
 
 use image::{load_from_memory, GenericImageView, Pixel};
 use keyboard_manager::KeyboardManager;
 use mouse_manager::MouseManager;
-use renderer::SkiaRenderer;
 use update_loop::UpdateLoop;
 
 use crate::{
     cmd_line::{CmdLineSettings, GeometryArgs},
     dimensions::Dimensions,
     frame::Frame,
-    renderer::{build_window, DrawCommand, GlWindow},
+    renderer::{build_window_config, DrawCommand, WindowConfig},
     running_tracker::*,
     settings::{
         load_last_window_settings, save_window_size, FontSettings, HotReloadConfigs,
@@ -87,7 +74,8 @@ pub enum WindowCommand {
     ListAvailableFonts,
     FocusWindow,
     Minimize,
-    ShowIntro(Vec<String>),
+    #[allow(dead_code)] // Theme change is only used on macOS right now
+    ThemeChanged(Option<Theme>),
     #[cfg(windows)]
     RegisterRightClick,
     #[cfg(windows)]
@@ -129,45 +117,19 @@ impl From<HotReloadConfigs> for UserEvent {
 }
 
 pub fn create_event_loop() -> EventLoop<UserEvent> {
-    EventLoopBuilder::<UserEvent>::with_user_event()
-        .build()
-        .expect("Failed to create winit event loop")
-}
-
-/// Set the window blurred or not.
-#[cfg(target_os = "macos")]
-pub fn set_window_blurred(window: &Window, opacity: f32) {
-    let window_blurred = SETTINGS.get::<WindowSettings>().window_blurred;
-    let opaque = opacity >= 1.0;
-
-    window.set_blur(window_blurred && !opaque);
-}
-
-/// Force macOS to clear shadow of transparent windows.
-#[cfg(target_os = "macos")]
-pub fn invalidate_shadow(window: &Window) {
-    use cocoa::base::NO;
-    use cocoa::base::YES;
-
-    let window_transparency = &SETTINGS.get::<WindowSettings>().transparency;
-    let opaque = *window_transparency >= 1.0;
-
-    let raw_window = match window.raw_window_handle() {
-        #[cfg(target_os = "macos")]
-        RawWindowHandle::AppKit(handle) => handle.ns_window as id,
-        _ => return,
-    };
-
-    let value = if opaque { YES } else { NO };
-    unsafe {
-        let _: id = msg_send![raw_window, setHasShadow: value];
-    }
+    let mut builder = EventLoopBuilder::<UserEvent>::with_user_event();
+    #[cfg(target_os = "macos")]
+    builder.with_default_menu(false);
+    let event_loop = builder.build().expect("Failed to create winit event loop");
+    #[cfg(target_os = "macos")]
+    crate::window::macos::register_file_handler();
+    event_loop
 }
 
 pub fn create_window(
     event_loop: &EventLoop<UserEvent>,
     initial_window_size: &WindowSize,
-) -> GlWindow {
+) -> WindowConfig {
     let icon = load_icon();
 
     let cmd_line_settings = SETTINGS.get::<CmdLineSettings>();
@@ -200,6 +162,9 @@ pub fn create_window(
 
     let frame_decoration = cmd_line_settings.frame;
 
+    #[cfg(target_os = "macos")]
+    let title_hidden = cmd_line_settings.title_hidden;
+
     // There is only two options for windows & linux, no need to match more options.
     #[cfg(not(target_os = "macos"))]
     let mut winit_window_builder =
@@ -210,13 +175,12 @@ pub fn create_window(
         Frame::Full => winit_window_builder,
         Frame::None => winit_window_builder.with_decorations(false),
         Frame::Buttonless => winit_window_builder
-            .with_transparent(true)
-            .with_title_hidden(true)
+            .with_title_hidden(title_hidden)
             .with_titlebar_buttons_hidden(true)
             .with_titlebar_transparent(true)
             .with_fullsize_content_view(true),
         Frame::Transparent => winit_window_builder
-            .with_title_hidden(true)
+            .with_title_hidden(title_hidden)
             .with_titlebar_transparent(true)
             .with_fullsize_content_view(true),
     };
@@ -240,8 +204,13 @@ pub fn create_window(
     #[cfg(target_os = "macos")]
     let winit_window_builder = winit_window_builder.with_accepts_first_mouse(false);
 
-    let gl_window = build_window(winit_window_builder, event_loop);
-    let window = &gl_window.window;
+    let window_config = build_window_config(winit_window_builder, event_loop);
+    let window = &window_config.window;
+
+    #[cfg(target_os = "macos")]
+    if let Some(previous_position) = previous_position {
+        window.set_outer_position(previous_position);
+    }
 
     // Check that window is visible in some monitor, and reposition it if not.
     window.current_monitor().and_then(|current_monitor| {
@@ -267,13 +236,7 @@ pub fn create_window(
         Some(())
     });
 
-    #[cfg(target_os = "macos")]
-    set_window_blurred(window, SETTINGS.get::<WindowSettings>().transparency);
-
-    #[cfg(target_os = "macos")]
-    invalidate_shadow(window);
-
-    gl_window
+    window_config
 }
 
 #[derive(Clone, Debug)]
@@ -326,7 +289,7 @@ pub fn determine_window_size(window_settings: Option<&PersistentWindowSettings>)
 }
 
 pub fn main_loop(
-    window: GlWindow,
+    window: WindowConfig,
     initial_window_size: WindowSize,
     initial_font_settings: Option<FontSettings>,
     event_loop: EventLoop<UserEvent>,
@@ -341,7 +304,14 @@ pub fn main_loop(
 
     let mut update_loop = UpdateLoop::new(cmd_line_settings.idle);
 
+    #[cfg(target_os = "macos")]
+    let mut menu = {
+        let mtm = MainThreadMarker::new().expect("must be on the main thread");
+        macos::Menu::new(mtm)
+    };
     event_loop.run(move |e, window_target| {
+        #[cfg(target_os = "macos")]
+        menu.ensure_menu_added(&e);
         if e == Event::LoopExiting {
             return;
         }

@@ -5,11 +5,9 @@ use winit::{
     event_loop::ControlFlow,
 };
 
-#[cfg(target_os = "macos")]
-use super::draw_background;
 use super::{UserEvent, WindowSettings, WinitWindowWrapper};
 use crate::{
-    profiling::{tracy_create_gpu_context, tracy_plot, tracy_zone},
+    profiling::{tracy_plot, tracy_zone},
     settings::SETTINGS,
 };
 
@@ -85,8 +83,6 @@ pub struct UpdateLoop {
 
 impl UpdateLoop {
     pub fn new(idle: bool) -> Self {
-        tracy_create_gpu_context("main_render_context");
-
         let previous_frame_start = Instant::now();
         let last_dt = 0.0;
         let should_render = ShouldRender::Immediately;
@@ -143,7 +139,7 @@ impl UpdateLoop {
     pub fn animate(&mut self, window_wrapper: &mut WinitWindowWrapper) {
         let dt = window_wrapper
             .vsync
-            .get_refresh_rate(&window_wrapper.windowed_context);
+            .get_refresh_rate(window_wrapper.skia_renderer.window());
 
         let now = Instant::now();
         let animation_time = (now - self.animation_start).as_secs_f64();
@@ -175,9 +171,6 @@ impl UpdateLoop {
         if let FocusedState::UnfocusedNotDrawn = self.focused {
             self.focused = FocusedState::Unfocused;
         }
-
-        #[cfg(target_os = "macos")]
-        draw_background(window_wrapper.windowed_context.window());
 
         self.num_consecutive_rendered += 1;
         self.last_dt = self.previous_frame_start.elapsed().as_secs_f32();
@@ -227,13 +220,12 @@ impl UpdateLoop {
                         // (most likely due to the compositor being busy). The animated frame will
                         // be rendered at an appropriate time anyway.
                         if !skipped_frame {
-                            // Always draw immediately for reduced latency if we have been idling
-                            if self.num_consecutive_rendered > 0
-                                && window_wrapper.vsync.uses_winit_throttling()
-                            {
+                            // When winit throttling is used, request a redraw and wait for the render event
+                            // Otherwise render immediately
+                            if window_wrapper.vsync.uses_winit_throttling() {
                                 window_wrapper
                                     .vsync
-                                    .request_redraw(&window_wrapper.windowed_context);
+                                    .request_redraw(window_wrapper.skia_renderer.window());
                                 self.pending_render = true;
                             } else {
                                 self.render(window_wrapper);

@@ -1,3 +1,4 @@
+mod api_info;
 mod clipboard;
 mod command;
 mod events;
@@ -11,11 +12,8 @@ use itertools::Itertools;
 use log::{error, info};
 use nvim_rs::{error::CallError, Neovim, UiAttachOptions, Value};
 use rmpv::Utf8String;
-use std::{io::Error, ops::Add, sync::Arc};
-use tokio::{
-    runtime::{Builder, Runtime},
-    task::JoinHandle,
-};
+use std::{io::Error, ops::Add};
+use tokio::runtime::{Builder, Runtime};
 use winit::event_loop::EventLoopProxy;
 
 use crate::{
@@ -24,8 +22,9 @@ use crate::{
 };
 pub use handler::NeovimHandler;
 use session::{NeovimInstance, NeovimSession};
-use setup::setup_neovide_specific_state;
+use setup::{get_api_information, setup_neovide_specific_state};
 
+pub use api_info::*;
 pub use command::create_nvim_command;
 pub use events::*;
 pub use session::NeovimWriter;
@@ -34,14 +33,8 @@ pub use ui_commands::{send_ui, start_ui_command_handler, ParallelCommand, Serial
 const INTRO_MESSAGE_LUA: &str = include_str!("../../lua/intro.lua");
 const NEOVIM_REQUIRED_VERSION: &str = "0.9.2";
 
-enum RuntimeState {
-    Idle,
-    Attached(JoinHandle<()>),
-}
-
 pub struct NeovimRuntime {
-    runtime: Runtime,
-    state: RuntimeState,
+    runtime: Option<Runtime>,
 }
 
 fn neovim_instance() -> Result<NeovimInstance> {
@@ -53,21 +46,103 @@ fn neovim_instance() -> Result<NeovimInstance> {
     }
 }
 
+/// Takes the --cmd or -c argument and returns the command to be executed.
+fn handle_command_arg(position: usize, args: Vec<String>) -> String {
+    args.get(position + 1).cloned().unwrap_or_default()
+}
+
+/// Takes the valid path argument and returns the startup directory.
+fn handle_command_arg_as_path_or_default(args: &mut Vec<String>) -> Option<String> {
+    args.retain(|arg| is_valid_path(arg));
+
+    let path = args.first().cloned().unwrap_or_default();
+    get_startup_directory(&path).map(|startup_directory| {
+        format!(
+            "if g:neovide_ntty == v:true | chdir {} | endif",
+            startup_directory
+        )
+    })
+}
+
+/// The function `setup_tty_startup_directory` sets up the startup directory for
+/// a non TTY Neovim session
+///
+/// Any nvim --cmd or -c argument is handled as a command to be executed.
+///
+/// Conditions:
+///
+/// - Is not a TTY session.
+/// - Argument is a directory, it becomes the startup directory.
+/// - Argument is a file, its parent directory becomes the startup directory.
+/// - Neither directory nor file, $HOME is used. (macOS specific)
+pub async fn setup_tty_startup_directory(
+    nvim: &Neovim<NeovimWriter>,
+) -> Result<(), Box<CallError>> {
+    use crate::utils::is_tty;
+
+    if is_tty() {
+        return Ok(());
+    }
+
+    let neovim_args = SETTINGS.get::<CmdLineSettings>().neovim_args;
+
+    let cmd_arg = neovim_args
+        .iter()
+        .rposition(|arg| arg == "--cmd" || arg == "-c");
+
+    let cmd = handle_command_arg_as_path_or_default(&mut neovim_args.clone());
+    if cmd.is_none() {
+        return Ok(());
+    }
+    let mut cmd = cmd.unwrap();
+
+    if let Some(pos) = cmd_arg {
+        cmd = format!("{} | {}", cmd, handle_command_arg(pos, neovim_args));
+    }
+
+    match nvim.command(cmd.as_str()).await {
+        Ok(_) => {}
+        Err(e) => log::error!("Error setting startup directory: {}", e),
+    }
+
+    Ok(())
+}
+
+fn get_startup_directory(path: &str) -> Option<String> {
+    use std::path::{Path, PathBuf};
+
+    // Only set the home directory on macOS
+    #[cfg(target_os = "macos")]
+    let home = Some(
+        dirs::home_dir()
+            .expect("Could not find home directory")
+            .to_string_lossy()
+            .to_string(),
+    );
+
+    #[cfg(not(target_os = "macos"))]
+    let home = None;
+
+    match path {
+        arg if PathBuf::from(&arg).is_dir() => Some(arg.to_string()),
+        arg if PathBuf::from(&arg).is_file() => Path::new(&arg)
+            .parent()
+            .map_or(home, |p| Some(p.to_string_lossy().to_string())),
+        _ => home,
+    }
+}
+
+fn is_valid_path(path: &str) -> bool {
+    use std::path::PathBuf;
+
+    PathBuf::from(path).is_dir() || PathBuf::from(path).is_file()
+}
+
 pub async fn setup_intro_message_autocommand(
     nvim: &Neovim<NeovimWriter>,
 ) -> Result<Value, Box<CallError>> {
     let args = vec![Value::from("setup_autocommand")];
     nvim.exec_lua(INTRO_MESSAGE_LUA, args).await
-}
-
-pub async fn show_intro_message(
-    nvim: &Neovim<NeovimWriter>,
-    message: &[String],
-) -> Result<(), Box<CallError>> {
-    let mut args = vec![Value::from("show_intro")];
-    let lines = message.iter().map(|line| Value::from(line.as_str()));
-    args.extend(lines);
-    nvim.exec_lua(INTRO_MESSAGE_LUA, args).await.map(|_| ())
 }
 
 pub async fn show_error_message(
@@ -113,17 +188,28 @@ async fn launch(handler: NeovimHandler, grid_size: Option<Dimensions>) -> Result
             bail!("Neovide requires nvim version {NEOVIM_REQUIRED_VERSION} or higher. Download the latest version here https://github.com/neovim/neovim/wiki/Installing-Neovim");
         }
     }
+
     let settings = SETTINGS.get::<CmdLineSettings>();
 
     let should_handle_clipboard = settings.wsl || settings.server.is_some();
-    setup_neovide_specific_state(&session.neovim, should_handle_clipboard).await?;
+    let api_information = get_api_information(&session.neovim).await?;
+    info!(
+        "Neovide registered to nvim with channel id {}",
+        api_information.channel
+    );
+    // This is too verbose to keep enabled all the time
+    // log::info!("Api information {:#?}", api_information);
+    setup_neovide_specific_state(&session.neovim, should_handle_clipboard, &api_information)
+        .await?;
 
-    start_ui_command_handler(Arc::clone(&session.neovim));
+    start_ui_command_handler(session.neovim.clone(), &api_information);
     SETTINGS.read_initial_values(&session.neovim).await?;
 
     let mut options = UiAttachOptions::new();
+    if !api_information.has_event("win_viewport_margins") {
+        options.set_hlstate_external(true);
+    }
     options.set_linegrid_external(true);
-    options.set_hlstate_external(true);
     options.set_multigrid_external(!settings.no_multi_grid);
     options.set_rgb(true);
 
@@ -158,8 +244,7 @@ impl NeovimRuntime {
         let runtime = Builder::new_multi_thread().enable_all().build()?;
 
         Ok(Self {
-            runtime,
-            state: RuntimeState::Idle,
+            runtime: Some(runtime),
         })
     }
 
@@ -168,20 +253,16 @@ impl NeovimRuntime {
         event_loop_proxy: EventLoopProxy<UserEvent>,
         grid_size: Option<Dimensions>,
     ) -> Result<()> {
-        assert!(matches!(self.state, RuntimeState::Idle));
         let handler = start_editor(event_loop_proxy);
-        let session = self.runtime.block_on(launch(handler, grid_size))?;
-        self.state = RuntimeState::Attached(self.runtime.spawn(run(session)));
+        let runtime = self.runtime.as_ref().unwrap();
+        let session = runtime.block_on(launch(handler, grid_size))?;
+        runtime.spawn(run(session));
         Ok(())
     }
 }
 
 impl Drop for NeovimRuntime {
     fn drop(&mut self) {
-        if let RuntimeState::Attached(join_handle) =
-            std::mem::replace(&mut self.state, RuntimeState::Idle)
-        {
-            let _ = self.runtime.block_on(join_handle);
-        }
+        self.runtime.take().unwrap().shutdown_background();
     }
 }

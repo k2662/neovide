@@ -130,6 +130,16 @@ With idle `off` (e.g. with `--no-idle` flag), neovide will constantly render new
 even when nothing changed. This takes more power and CPU time, but can possibly help
 with frame timing issues.
 
+### Title (macOS Only)
+
+```sh
+--title-hidden or $NEOVIDE_TITLE_HIDDEN
+```
+
+**Available since 0.12.2.**
+
+This sets the window title to be hidden on macOS.
+
 ### sRGB
 
 ```sh
@@ -143,15 +153,14 @@ platforms should not need it, but if you encounter either startup crashes or
 wrong colors, you can try to swap the option. The command line parameter takes
 priority over the environment variable.
 
-### No Tabs
+### Tabs
 
 ```sh
---no-tabs
+--no-tabs, --tabs or $NEOVIDE_TABS=0|1
 ```
 
 By default, Neovide opens files given directly to Neovide (not NeoVim through `--`!) in multiple
-tabs to avoid confusing new users. The option disables that and makes multiple given files to normal
-buffers.
+tabs to avoid confusing new users. `--no-tabs` disables this behavior.
 
 Note: Even if files are opened in tabs, they're buffers anyways. It's just about them being visible
 or not.
